@@ -3,6 +3,7 @@ const onlineBtn = document.getElementById('online')
 const callBtn = document.getElementById('call')
 
 const peers = {}
+let partnerVideo
 let otherPeer
 let otheruser
 let localstream
@@ -140,15 +141,15 @@ async function call() {
   }
 
   function handleTrack(e) {
-    const video = document.createElement('video')
+    if (!partnerVideo) {
+      partnerVideo = document.createElement('video')
+      partnerVideo.width = 480
+      partnerVideo.height = 360
+      partnerVideo.autoplay = true
+      videoGrid.appendChild(partnerVideo)
+    }
 
-    video.width = 480
-    video.height = 360
-    video.autoplay = true
-
-    video.srcObject = e.streams[0]
-
-    videoGrid.appendChild(video)
+    partnerVideo.srcObject = e.streams[0]
   }
 }
 
