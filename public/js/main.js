@@ -3,9 +3,7 @@ const onlineBtn = document.getElementById('online')
 const callBtn = document.getElementById('call')
 
 const peers = {}
-let partnerVideo
-let otherPeer
-let otheruser
+const userVideos = {}
 let localstream
 
 async function online() {
@@ -34,11 +32,6 @@ async function call() {
 
   socket.on('other user', userID => {
     callUser(userID)
-    otherUser = userID
-  })
-
-  socket.on('user joined', userID => {
-    otherUser = userID
   })
 
   socket.on('offer', handleOffer)
@@ -46,18 +39,19 @@ async function call() {
   socket.on('icecandidate', handleNewICECandidateMsg)
 
   function callUser(userID) {
-    peers[userID] = '1'
-    otherPeer = createPeer(userID)
+    peers[userID] = createPeer(userID)
     localstream.getTracks().forEach(track => {
-      otherPeer.addTrack(track, localstream)
+      peers[userID].addTrack(track, localstream)
     })
   }
 
   function createPeer(userID) {
     const peer = new RTCPeerConnection()
 
-    peer.addEventListener('icecandidate', handleICECandidateEvent)
-    peer.addEventListener('track', handleTrack)
+    peer.addEventListener('icecandidate', e =>
+      handleICECandidateEvent(e, userID)
+    )
+    peer.addEventListener('track', e => handleTrack(e, userID))
     peer.addEventListener('negotiationneeded', () => {
       handleNegotiationNeededEvent(userID)
     })
@@ -68,8 +62,8 @@ async function call() {
   async function handleNegotiationNeededEvent(userID) {
     try {
       console.log(`Negotiation Needed ${userID}`)
-      const offer = await otherPeer.createOffer()
-      await otherPeer.setLocalDescription(offer)
+      const offer = await peers[userID].createOffer()
+      await peers[userID].setLocalDescription(offer)
 
       const payload = {
         target: userID,
@@ -86,14 +80,13 @@ async function call() {
   async function handleOffer(incoming) {
     try {
       console.log(`Caller: ${incoming.caller} Target: ${incoming.target}`)
-      peers[incoming.caller] = '2'
-      otherPeer = createPeer()
-      await otherPeer.setRemoteDescription(incoming.offer)
+      peers[incoming.caller] = createPeer()
+      await peers[incoming.caller].setRemoteDescription(incoming.offer)
       localstream
         .getTracks()
-        .forEach(track => otherPeer.addTrack(track, localstream))
-      const answer = await otherPeer.createAnswer()
-      await otherPeer.setLocalDescription(answer)
+        .forEach(track => peers[incoming.caller].addTrack(track, localstream))
+      const answer = await peers[incoming.caller].createAnswer()
+      await peers[incoming.caller].setLocalDescription(answer)
 
       const payload = {
         target: incoming.caller,
@@ -109,18 +102,17 @@ async function call() {
 
   async function handleAnswer(incoming) {
     try {
-      console.log(`Answer ${incoming}`)
       const { answer } = incoming
-      await otherPeer.setRemoteDescription(answer)
+      await peers[incoming.caller].setRemoteDescription(answer)
     } catch (e) {
       console.log(e)
     }
   }
 
-  function handleICECandidateEvent(e) {
+  function handleICECandidateEvent(e, userID) {
     if (e.candidate) {
       const payload = {
-        target: otherUser,
+        target: userID,
         caller: socket.id,
         candidate: e.candidate,
       }
@@ -132,24 +124,23 @@ async function call() {
   async function handleNewICECandidateMsg(incoming) {
     // The problem is peers and incoming.target is not the same
     try {
-      console.log('ICE Candidate Message')
-      console.log(`peer ${Object.keys(peers)}, target: ${incoming.target}`)
-      await otherPeer.addIceCandidate(incoming.candidate)
+      console.log('on ice candidate')
+      await peers[incoming.caller].addIceCandidate(incoming.candidate)
     } catch (e) {
       console.log(e)
     }
   }
 
-  function handleTrack(e) {
-    if (!partnerVideo) {
-      partnerVideo = document.createElement('video')
-      partnerVideo.width = 480
-      partnerVideo.height = 360
-      partnerVideo.autoplay = true
-      videoGrid.appendChild(partnerVideo)
+  function handleTrack(e, userID) {
+    if (!userVideos[userID]) {
+      userVideos[userID] = document.createElement('video')
+      userVideos[userID].width = 480
+      userVideos[userID].height = 360
+      userVideos[userID].autoplay = true
+      videoGrid.appendChild(userVideos[userID])
     }
 
-    partnerVideo.srcObject = e.streams[0]
+    userVideos[userID].srcObject = e.streams[0]
   }
 }
 
