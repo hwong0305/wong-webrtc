@@ -7,71 +7,32 @@ const app = express()
 const server = createServer(app)
 const io = new Server(server)
 
-const peers = {}
+const rooms = {}
 
 io.on('connect', socket => {
   socket.on('join', roomID => {
-    if (peers[roomID]) {
-      peers[roomID].push(socket.id)
+    if (rooms[roomID]) {
+      rooms[roomID].push(socket.id)
     } else {
-      peers[roomID] = [socket.id]
+      rooms[roomID] = [socket.id]
     }
-
-    const otherUser = peers[roomID].find(id => id !== socket.id)
+    const otherUser = rooms[roomID].find(id => id !== socket.id)
     if (otherUser) {
       socket.emit('other user', otherUser)
-      socket.to(otherUser).emit('user joined', socket.id)
+      io.to(otherUser).emit('user joined', socket.id)
     }
-
-    // socket.emit(
-    //   'other users',
-    //   peers[roomID].filter(e => e !== socket.id)
-    // )
-  })
-
-  socket.on('icecandidate', payload => {
-    const { candidate, target } = payload
-    console.log({
-      target,
-      user: socket.id,
-    })
-
-    const outgoingPayload = {
-      candidate,
-      target: socket.id,
-    }
-
-    socket.to(target).emit('icecandidate', outgoingPayload)
   })
 
   socket.on('offer', payload => {
-    const { target, offer } = payload
-    console.log({
-      target,
-      user: socket.id,
-    })
-
-    const outgoingPayload = {
-      target: socket.id,
-      offer,
-    }
-
-    socket.to(target).emit('offer', outgoingPayload)
+    io.to(payload.target).emit('offer', payload)
   })
 
   socket.on('answer', payload => {
-    const { target, answer } = payload
-    console.log({
-      target,
-      user: socket.id,
-    })
+    io.to(payload.target).emit('answer', payload)
+  })
 
-    const outgoingPayload = {
-      target: socket.id,
-      answer,
-    }
-
-    socket.to(target).emit('answer', outgoingPayload)
+  socket.on('icecandidate', incoming => {
+    io.to(incoming.target).emit('icecandidate', incoming)
   })
 })
 

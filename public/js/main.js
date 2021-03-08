@@ -3,6 +3,7 @@ const onlineBtn = document.getElementById('online')
 const callBtn = document.getElementById('call')
 
 const peers = {}
+let otherPeer
 let otheruser
 let localstream
 
@@ -30,105 +31,122 @@ async function call() {
 
   socket.emit('join', ROOM_ID)
 
-  socket.on('other users', users => {
-    users.forEach(user => {
-      const peer = new RTCPeerConnection({
-        iceServers: [
-          {
-            urls: 'stun:stun.stunprotocol.org',
-          },
-        ],
-      })
-      localstream.getTracks().forEach(track => {
-        peer.addTrack(track, localstream)
-      })
-
-      peer.onicecandidate = e => handleICECandidateEvent(e, user)
-      peer.ontrack = handleTrack
-      peer.onnegotiationneeded = () => handleNegotiationNeeded(user)
-      peers[user] = peer
-    })
+  socket.on('other user', userID => {
+    callUser(userID)
+    otherUser = userID
   })
 
-  socket.on('offer', async payload => {
-    console.log('Socket on Offer')
-    const { target, offer } = payload
-    if (!peers[target]) {
-      peers[target] = new RTCPeerConnection({
-        iceServers: [
-          {
-            urls: 'stun:stun.stunprotocol.org',
-          },
-        ],
-      })
-
-      localstream.getTracks().forEach(track => {
-        peers[target].addTrack(track, localstream)
-      })
-    }
-
-    await peers[target].setRemoteDescription(offer)
-
-    const answer = await peers[target].createAnswer()
-    const outgoingPayload = {
-      target,
-      answer,
-    }
-
-    socket.emit('answer', outgoingPayload)
+  socket.on('user joined', userID => {
+    otherUser = userID
   })
 
-  socket.on('answer', async payload => {
-    console.log('Socket on Answer')
-    const { target, answer } = payload
-
-    await peers[target].setRemoteDescription(answer)
-  })
-
-  socket.on('icecandidate', async payload => {
-    console.log('socket on ice candidate')
-    const { candidate, target } = payload
-
-    await peers[target].addIceCandidate(candidate)
-  })
+  socket.on('offer', handleOffer)
+  socket.on('answer', handleAnswer)
+  socket.on('icecandidate', handleNewICECandidateMsg)
 
   function callUser(userID) {
-    peers[userID] = createPeer(userID)
+    peers[userID] = '1'
+    otherPeer = createPeer(userID)
+    localstream.getTracks().forEach(track => {
+      otherPeer.addTrack(track, localstream)
+    })
   }
 
-  function handleICECandidateEvent(e, userID) {
-    if (e.candidate) {
-      console.log('ice candidate event')
+  function createPeer(userID) {
+    const peer = new RTCPeerConnection()
+
+    peer.addEventListener('icecandidate', handleICECandidateEvent)
+    peer.addEventListener('track', handleTrack)
+    peer.addEventListener('negotiationneeded', () => {
+      handleNegotiationNeededEvent(userID)
+    })
+
+    return peer
+  }
+
+  async function handleNegotiationNeededEvent(userID) {
+    try {
+      console.log(`Negotiation Needed ${userID}`)
+      const offer = await otherPeer.createOffer()
+      await otherPeer.setLocalDescription(offer)
+
       const payload = {
-        candidate: e.candidate,
         target: userID,
+        caller: socket.id,
+        offer,
       }
+
+      socket.emit('offer', payload)
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  async function handleOffer(incoming) {
+    try {
+      console.log(`Caller: ${incoming.caller} Target: ${incoming.target}`)
+      peers[incoming.caller] = '2'
+      otherPeer = createPeer()
+      await otherPeer.setRemoteDescription(incoming.offer)
+      localstream
+        .getTracks()
+        .forEach(track => otherPeer.addTrack(track, localstream))
+      const answer = await otherPeer.createAnswer()
+      await otherPeer.setLocalDescription(answer)
+
+      const payload = {
+        target: incoming.caller,
+        caller: socket.id,
+        answer,
+      }
+
+      socket.emit('answer', payload)
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  async function handleAnswer(incoming) {
+    try {
+      console.log(`Answer ${incoming}`)
+      const { answer } = incoming
+      await otherPeer.setRemoteDescription(answer)
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  function handleICECandidateEvent(e) {
+    if (e.candidate) {
+      const payload = {
+        target: otherUser,
+        caller: socket.id,
+        candidate: e.candidate,
+      }
+
       socket.emit('icecandidate', payload)
     }
   }
 
-  async function handleNegotiationNeeded(userID) {
-    console.log('Handle Negotiation Needed')
-    const offer = await peers[userID].createOffer()
-    await peers[userID].setLocalDescription(offer)
-
-    const payload = {
-      target: userID,
-      offer: offer,
+  async function handleNewICECandidateMsg(incoming) {
+    // The problem is peers and incoming.target is not the same
+    try {
+      console.log('ICE Candidate Message')
+      console.log(`peer ${Object.keys(peers)}, target: ${incoming.target}`)
+      await otherPeer.addIceCandidate(incoming.candidate)
+    } catch (e) {
+      console.log(e)
     }
-
-    socket.emit('offer', payload)
   }
 
   function handleTrack(e) {
-    console.log('handle track event')
     const video = document.createElement('video')
 
     video.width = 480
     video.height = 360
-    video.srcObject = e.streams[0]
+    video.autoplay = true
 
-    video.play()
+    video.srcObject = e.streams[0]
 
     videoGrid.appendChild(video)
   }
